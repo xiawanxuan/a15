@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -166,10 +167,14 @@ func (m *NodeManager) SetLoadBalancerStrategy(strategy string) {
 func (m *NodeManager) GetBestNodeForTask(task *models.Task) (*models.Node, error) {
 	nodes := m.GetAvailableNodes()
 	if len(nodes) == 0 {
-		return nil
+		return nil, errors.New("no available nodes")
 	}
 
-	return m.loadBalancer.SelectNodeWithPriority(nodes, task.Priority)
+	node := m.loadBalancer.SelectNodeWithPriority(nodes, task.Priority)
+	if node == nil {
+		return nil, errors.New("no suitable node found")
+	}
+	return node, nil
 }
 
 func (m *NodeManager) GetLoadBalancer() *LoadBalancer {

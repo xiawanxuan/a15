@@ -15,6 +15,7 @@ type NodeManager interface {
 	GetAvailableNodes() []*models.Node
 	GetNode(nodeID string) (*models.Node, bool)
 	UpdateNodeTaskCount(nodeID string, delta int) error
+	GetBestNodeForTask(task *models.Task) (*models.Node, error)
 }
 
 type AlertManager interface {
@@ -129,8 +130,8 @@ func (s *Scheduler) dispatchTasks() {
 			continue
 		}
 
-		node := s.selectBestNode(task, nodes)
-		if node == nil {
+		node, err := s.nodeManager.GetBestNodeForTask(task)
+		if err != nil || node == nil {
 			utils.Sugar.Warnf("No suitable node found for task %s", task.ID)
 			_ = s.lock.Unlock(s.ctx, lockKey)
 			break
@@ -153,25 +154,6 @@ func (s *Scheduler) dispatchTasks() {
 		_ = s.lock.Unlock(s.ctx, lockKey)
 		utils.Sugar.Infof("Task %s dispatched to node %s", task.ID, node.ID)
 	}
-}
-
-func (s *Scheduler) selectBestNode(task *models.Task, nodes []*models.Node) *models.Node {
-	var bestNode *models.Node
-	minLoad := -1
-
-	for _, node := range nodes {
-		if node.Status != models.NodeStatusOnline && node.Status != models.NodeStatusIdle {
-			continue
-		}
-
-		load := node.Stats.RunningTasks * 100 / node.Weight
-		if minLoad == -1 || load < minLoad {
-			minLoad = load
-			bestNode = node
-		}
-	}
-
-	return bestNode
 }
 
 func (s *Scheduler) retryLoop() {

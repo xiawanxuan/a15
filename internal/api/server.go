@@ -61,11 +61,11 @@ func (s *Server) setupRoutes() {
 		tasks.POST("", s.taskHandler.CreateTask)
 		tasks.GET("", s.taskHandler.ListTasks)
 		tasks.GET("/stats", s.taskHandler.GetStats)
+		tasks.POST("/logs/export", s.taskHandler.ExportLogs)
+		tasks.POST("/logs/summary", s.taskHandler.GetLogSummary)
 		tasks.GET("/:id", s.taskHandler.GetTask)
 		tasks.PUT("/:id/status", s.taskHandler.UpdateTaskStatus)
 		tasks.GET("/:id/events", s.taskHandler.GetTaskEvents)
-		tasks.POST("/logs/export", s.taskHandler.ExportLogs)
-		tasks.POST("/logs/summary", s.taskHandler.GetLogSummary)
 	}
 
 	nodes := v1.Group("/nodes")
