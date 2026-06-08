@@ -14,12 +14,13 @@ type AlertManager interface {
 }
 
 type NodeManager struct {
-	store        *NodeStore
-	alertManager AlertManager
-	ctx          context.Context
-	cancel       context.CancelFunc
+	store            *NodeStore
+	alertManager     AlertManager
+	loadBalancer     *LoadBalancer
+	ctx              context.Context
+	cancel           context.CancelFunc
 	heartbeatTimeout time.Duration
-	checkInterval  time.Duration
+	checkInterval    time.Duration
 }
 
 func NewNodeManager(store *NodeStore, alertManager AlertManager) *NodeManager {
@@ -27,6 +28,7 @@ func NewNodeManager(store *NodeStore, alertManager AlertManager) *NodeManager {
 	return &NodeManager{
 		store:            store,
 		alertManager:     alertManager,
+		loadBalancer:     NewLoadBalancer("priority_aware"),
 		ctx:              ctx,
 		cancel:           cancel,
 		heartbeatTimeout: 30 * time.Second,
@@ -157,26 +159,23 @@ func (m *NodeManager) SetCheckInterval(interval time.Duration) {
 	m.checkInterval = interval
 }
 
-func (m *NodeManager) GetBestNodeForTask(task *models.Task) *models.Node {
+func (m *NodeManager) SetLoadBalancerStrategy(strategy string) {
+	m.loadBalancer = NewLoadBalancer(strategy)
+}
+
+func (m *NodeManager) GetBestNodeForTask(task *models.Task) (*models.Node, error) {
 	nodes := m.GetAvailableNodes()
 	if len(nodes) == 0 {
 		return nil
 	}
 
-	var bestNode *models.Node
-	minLoad := -1
+	return m.loadBalancer.SelectNodeWithPriority(nodes, task.Priority)
+}
 
-	for _, node := range nodes {
-		if node.Status == models.NodeStatusOffline || node.Status == models.NodeStatusDisabled {
-			continue
-		}
+func (m *NodeManager) GetLoadBalancer() *LoadBalancer {
+	return m.loadBalancer
+}
 
-		load := node.Stats.RunningTasks * 100 / node.Weight
-		if minLoad == -1 || load < minLoad {
-			minLoad = load
-			bestNode = node
-		}
-	}
-
-	return bestNode
+func (m *NodeManager) SetLoadBalancerStrategy(strategy string) {
+	m.loadBalancer.SetStrategy(strategy)
 }

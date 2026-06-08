@@ -64,6 +64,8 @@ func (s *Server) setupRoutes() {
 		tasks.GET("/:id", s.taskHandler.GetTask)
 		tasks.PUT("/:id/status", s.taskHandler.UpdateTaskStatus)
 		tasks.GET("/:id/events", s.taskHandler.GetTaskEvents)
+		tasks.POST("/logs/export", s.taskHandler.ExportLogs)
+		tasks.POST("/logs/summary", s.taskHandler.GetLogSummary)
 	}
 
 	nodes := v1.Group("/nodes")
@@ -81,6 +83,12 @@ func (s *Server) setupRoutes() {
 		data.POST("", s.dataHandler.AddData)
 		data.GET("", s.dataHandler.ListData)
 		data.GET("/stats", s.dataHandler.GetStats)
+		data.POST("/search", s.dataHandler.SearchData)
+		data.GET("/targets", s.dataHandler.GetDistinctTargets)
+		data.GET("/telescopes", s.dataHandler.GetDistinctTelescopes)
+		data.GET("/filters", s.dataHandler.GetDistinctFilters)
+		data.GET("/metadata/keys", s.dataHandler.GetMetadataKeys)
+		data.GET("/metadata/values/:key", s.dataHandler.GetMetadataValues)
 		data.GET("/:id", s.dataHandler.GetData)
 		data.GET("/:id/download", s.dataHandler.DownloadData)
 		data.GET("/:id/presigned-url", s.dataHandler.GetPresignedURL)

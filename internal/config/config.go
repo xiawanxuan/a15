@@ -37,8 +37,9 @@ type SchedulerConfig struct {
 }
 
 type NodeConfig struct {
-	HeartbeatTimeout int `mapstructure:"heartbeat_timeout"`
-	CheckInterval    int `mapstructure:"check_interval"`
+	HeartbeatTimeout  int    `mapstructure:"heartbeat_timeout"`
+	CheckInterval     int    `mapstructure:"check_interval"`
+	LoadBalancerStrategy string `mapstructure:"load_balancer_strategy"`
 }
 
 type ArchiverConfig struct {

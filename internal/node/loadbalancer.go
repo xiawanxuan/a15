@@ -2,6 +2,7 @@ package node
 
 import (
 	"math/rand"
+	"sort"
 	"sync"
 
 	"astro-scheduler/pkg/models"
@@ -21,13 +22,17 @@ func NewLoadBalancer(strategy string) *LoadBalancer {
 }
 
 func (lb *LoadBalancer) SelectNode(nodes []*models.Node) *models.Node {
+	return lb.SelectNodeWithPriority(nodes, models.TaskPriorityMedium)
+}
+
+func (lb *LoadBalancer) SelectNodeWithPriority(nodes []*models.Node, priority models.TaskPriority) *models.Node {
 	if len(nodes) == 0 {
 		return nil
 	}
 
 	availableNodes := make([]*models.Node, 0)
 	for _, node := range nodes {
-		if node.Status == models.NodeStatusOnline || node.Status == models.NodeStatusIdle {
+		if node.Status == models.NodeStatusOnline || node.Status == models.NodeStatusIdle || node.Status == models.NodeStatusBusy {
 			availableNodes = append(availableNodes, node)
 		}
 	}
@@ -49,10 +54,12 @@ func (lb *LoadBalancer) SelectNode(nodes []*models.Node) *models.Node {
 		return lb.leastConnections(availableNodes)
 	case "weighted":
 		return lb.weighted(availableNodes)
+	case "priority_aware":
+		return lb.priorityAware(availableNodes, priority)
 	case "random":
 		return lb.random(availableNodes)
 	default:
-		return lb.leastConnections(availableNodes)
+		return lb.priorityAware(availableNodes, priority)
 	}
 }
 
@@ -115,6 +122,60 @@ func (lb *LoadBalancer) random(nodes []*models.Node) *models.Node {
 		return nil
 	}
 	return nodes[rand.Intn(len(nodes))]
+}
+
+func (lb *LoadBalancer) priorityAware(nodes []*models.Node, priority models.TaskPriority) *models.Node {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	sortedNodes := make([]*models.Node, len(nodes))
+	copy(sortedNodes, nodes)
+
+	sort.Slice(sortedNodes, func(i, j int) bool {
+		loadI := float64(sortedNodes[i].Stats.RunningTasks) / float64(sortedNodes[i].Weight)
+		loadJ := float64(sortedNodes[j].Stats.RunningTasks) / float64(sortedNodes[j].Weight)
+		return loadI < loadJ
+	})
+
+	priorityWeight := float64(priority) / 10.0
+	if priorityWeight > 1.0 {
+		priorityWeight = 1.0
+	}
+
+	candidates := sortedNodes
+	if priority >= models.TaskPriorityHigh && len(sortedNodes) > 1 {
+		bestCount := max(1, len(sortedNodes)/2)
+		candidates = sortedNodes[:bestCount]
+	} else if priority <= models.TaskPriorityLow && len(sortedNodes) > 1 {
+		startIdx := len(sortedNodes) / 2
+		if startIdx >= len(sortedNodes) {
+			startIdx = len(sortedNodes) - 1
+		}
+		candidates = sortedNodes[startIdx:]
+	}
+
+	if len(candidates) == 0 {
+		return sortedNodes[0]
+	}
+
+	return candidates[rand.Intn(len(candidates))]
+}
+
+func (lb *LoadBalancer) SelectNodeByCapability(nodes []*models.Node, taskType models.TaskType, priority models.TaskPriority) *models.Node {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	filteredNodes := make([]*models.Node, 0)
+	for _, node := range nodes {
+		if node.Status == models.NodeStatusOffline || node.Status == models.NodeStatusDisabled {
+			continue
+		}
+		filteredNodes = append(filteredNodes, node)
+	}
+
+	return lb.SelectNodeWithPriority(filteredNodes, priority)
 }
 
 func (lb *LoadBalancer) SetStrategy(strategy string) {

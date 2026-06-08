@@ -20,6 +20,7 @@ scheduler:
 node:
   heartbeat_timeout: 30
   check_interval: 10
+  load_balancer_strategy: "priority_aware"
 
 storage:
   type: "local"

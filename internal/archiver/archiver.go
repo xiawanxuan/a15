@@ -312,6 +312,30 @@ func (a *Archiver) DeletePolicy(policyID string) error {
 	return a.store.DeletePolicy(policyID)
 }
 
+func (a *Archiver) SearchData(query SearchQuery) ([]*models.ObservationData, int) {
+	return a.store.SearchData(query)
+}
+
+func (a *Archiver) GetDistinctTargets() []string {
+	return a.store.GetDistinctTargets()
+}
+
+func (a *Archiver) GetDistinctTelescopes() []string {
+	return a.store.GetDistinctTelescopes()
+}
+
+func (a *Archiver) GetDistinctFilters() []string {
+	return a.store.GetDistinctFilters()
+}
+
+func (a *Archiver) GetMetadataKeys() []string {
+	return a.store.GetMetadataKeys()
+}
+
+func (a *Archiver) GetMetadataValues(key string) []string {
+	return a.store.GetMetadataValues(key)
+}
+
 func (a *Archiver) GetObjectStorage() storage.ObjectStorage {
 	return a.objectStorage
 }

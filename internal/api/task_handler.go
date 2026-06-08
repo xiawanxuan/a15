@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"astro-scheduler/internal/scheduler"
 	"astro-scheduler/pkg/models"
@@ -140,4 +141,88 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 func (h *TaskHandler) GetStats(c *gin.Context) {
 	stats := h.scheduler.GetStats()
 	c.JSON(http.StatusOK, stats)
+}
+
+type ExportLogsRequest struct {
+	TaskIDs    []string `json:"task_ids"`
+	TaskStatus string   `json:"task_status"`
+	NodeID     string   `json:"node_id"`
+	StartTime  string   `json:"start_time"`
+	EndTime    string   `json:"end_time"`
+	EventType  string   `json:"event_type"`
+	Format     string   `json:"format"`
+}
+
+func (h *TaskHandler) ExportLogs(c *gin.Context) {
+	var req ExportLogsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	query := scheduler.LogExportQuery{
+		TaskIDs:    req.TaskIDs,
+		TaskStatus: models.TaskStatus(req.TaskStatus),
+		NodeID:     req.NodeID,
+		EventType:  req.EventType,
+		Format:     req.Format,
+	}
+
+	if req.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.StartTime); err == nil {
+			query.StartTime = &t
+		}
+	}
+
+	if req.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.EndTime); err == nil {
+			query.EndTime = &t
+		}
+	}
+
+	data, contentType, err := h.scheduler.ExportTaskLogs(query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	filename := "task_logs"
+	if query.Format == "csv" {
+		filename += ".csv"
+	} else {
+		filename += ".json"
+	}
+
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+	c.Data(http.StatusOK, contentType, data)
+}
+
+func (h *TaskHandler) GetLogSummary(c *gin.Context) {
+	var req ExportLogsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	query := scheduler.LogExportQuery{
+		TaskIDs:    req.TaskIDs,
+		TaskStatus: models.TaskStatus(req.TaskStatus),
+		NodeID:     req.NodeID,
+		EventType:  req.EventType,
+	}
+
+	if req.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.StartTime); err == nil {
+			query.StartTime = &t
+		}
+	}
+
+	if req.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.EndTime); err == nil {
+			query.EndTime = &t
+		}
+	}
+
+	summary := h.scheduler.GetLogSummary(query)
+	c.JSON(http.StatusOK, summary)
 }

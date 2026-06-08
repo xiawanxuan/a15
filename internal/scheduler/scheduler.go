@@ -390,3 +390,11 @@ func (s *Scheduler) GetTaskEvents(taskID string, limit int) []*models.TaskEvent 
 func (s *Scheduler) GetStats() map[string]interface{} {
 	return s.store.GetStats()
 }
+
+func (s *Scheduler) ExportTaskLogs(query LogExportQuery) ([]byte, string, error) {
+	return s.store.ExportTaskLogs(query)
+}
+
+func (s *Scheduler) GetLogSummary(query LogExportQuery) TaskLogSummary {
+	return s.store.GetLogSummary(query)
+}

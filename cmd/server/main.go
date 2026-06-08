@@ -68,6 +68,9 @@ func main() {
 	nodeManager := node.NewNodeManager(nodeStore, notifierSvc)
 	nodeManager.SetHeartbeatTimeout(time.Duration(cfg.Node.HeartbeatTimeout) * time.Second)
 	nodeManager.SetCheckInterval(time.Duration(cfg.Node.CheckInterval) * time.Second)
+	if cfg.Node.LoadBalancerStrategy != "" {
+		nodeManager.SetLoadBalancerStrategy(cfg.Node.LoadBalancerStrategy)
+	}
 	nodeManager.Start()
 	defer nodeManager.Stop()
 

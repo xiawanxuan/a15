@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -195,6 +196,148 @@ func (c *SchedulerClient) HealthCheck() (bool, error) {
 	}
 
 	return result.Status == "ok", nil
+}
+
+type SearchDataRequest struct {
+	Target     string            `json:"target"`
+	TaskID     string            `json:"task_id"`
+	NodeID     string            `json:"node_id"`
+	Format     string            `json:"format"`
+	Status     string            `json:"status"`
+	Telescope  string            `json:"telescope"`
+	Filter     string            `json:"filter"`
+	Instrument string            `json:"instrument"`
+	Metadata   map[string]string `json:"metadata"`
+	StartTime  string            `json:"start_time"`
+	EndTime    string            `json:"end_time"`
+	MinSize    int64             `json:"min_size"`
+	MaxSize    int64             `json:"max_size"`
+	Limit      int               `json:"limit"`
+	Offset     int               `json:"offset"`
+	SortBy     string            `json:"sort_by"`
+	SortOrder  string            `json:"sort_order"`
+}
+
+type SearchDataResult struct {
+	Data  []*models.ObservationData `json:"data"`
+	Total int                       `json:"total"`
+	Limit int                       `json:"limit"`
+	Offset int                      `json:"offset"`
+}
+
+func (c *SchedulerClient) SearchData(req SearchDataRequest) (*SearchDataResult, error) {
+	var result SearchDataResult
+	if err := c.post("/data/search", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *SchedulerClient) GetDistinctTargets() ([]string, error) {
+	var result struct {
+		Targets []string `json:"targets"`
+	}
+	if err := c.get("/data/targets", &result); err != nil {
+		return nil, err
+	}
+	return result.Targets, nil
+}
+
+func (c *SchedulerClient) GetDistinctTelescopes() ([]string, error) {
+	var result struct {
+		Telescopes []string `json:"telescopes"`
+	}
+	if err := c.get("/data/telescopes", &result); err != nil {
+		return nil, err
+	}
+	return result.Telescopes, nil
+}
+
+func (c *SchedulerClient) GetDistinctFilters() ([]string, error) {
+	var result struct {
+		Filters []string `json:"filters"`
+	}
+	if err := c.get("/data/filters", &result); err != nil {
+		return nil, err
+	}
+	return result.Filters, nil
+}
+
+func (c *SchedulerClient) GetMetadataKeys() ([]string, error) {
+	var result struct {
+		Keys []string `json:"keys"`
+	}
+	if err := c.get("/data/metadata/keys", &result); err != nil {
+		return nil, err
+	}
+	return result.Keys, nil
+}
+
+func (c *SchedulerClient) GetMetadataValues(key string) ([]string, error) {
+	var result struct {
+		Values []string `json:"values"`
+	}
+	if err := c.get("/data/metadata/values/"+key, &result); err != nil {
+		return nil, err
+	}
+	return result.Values, nil
+}
+
+type ExportLogsRequest struct {
+	TaskIDs    []string `json:"task_ids"`
+	TaskStatus string   `json:"task_status"`
+	NodeID     string   `json:"node_id"`
+	StartTime  string   `json:"start_time"`
+	EndTime    string   `json:"end_time"`
+	EventType  string   `json:"event_type"`
+	Format     string   `json:"format"`
+}
+
+type LogSummary struct {
+	TotalEvents   int   `json:"TotalEvents"`
+	TotalTasks    int   `json:"TotalTasks"`
+	SuccessTasks  int   `json:"SuccessTasks"`
+	FailedTasks   int   `json:"FailedTasks"`
+	RunningTasks  int   `json:"RunningTasks"`
+	PendingTasks  int   `json:"PendingTasks"`
+	AvgDurationMs int64 `json:"AvgDurationMs"`
+	MaxDurationMs int64 `json:"MaxDurationMs"`
+	MinDurationMs int64 `json:"MinDurationMs"`
+}
+
+func (c *SchedulerClient) GetLogSummary(req ExportLogsRequest) (*LogSummary, error) {
+	var result LogSummary
+	if err := c.post("/tasks/logs/summary", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *SchedulerClient) ExportLogs(req ExportLogsRequest) ([]byte, string, error) {
+	url := c.BaseURL + "/tasks/logs/export"
+
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, "", err
+	}
+
+	resp, err := c.HTTPClient.Post(url, "application/json", bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("API error: %d", resp.StatusCode)
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, "", err
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	return buf.Bytes(), contentType, nil
 }
 
 func (c *SchedulerClient) get(path string, result interface{}) error {
