@@ -82,6 +82,8 @@ func (s *Server) setupRoutes() {
 		data.GET("", s.dataHandler.ListData)
 		data.GET("/stats", s.dataHandler.GetStats)
 		data.GET("/:id", s.dataHandler.GetData)
+		data.GET("/:id/download", s.dataHandler.DownloadData)
+		data.GET("/:id/presigned-url", s.dataHandler.GetPresignedURL)
 		data.GET("/task/:task_id", s.dataHandler.GetDataByTask)
 
 		policies := data.Group("/policies")

@@ -3,18 +3,22 @@ package config
 import (
 	"fmt"
 
+	"astro-scheduler/pkg/lock"
 	"astro-scheduler/pkg/models"
+	"astro-scheduler/pkg/storage"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Server      ServerConfig      `mapstructure:"server"`
-	Log         LogConfig         `mapstructure:"log"`
-	Scheduler   SchedulerConfig   `mapstructure:"scheduler"`
-	Node        NodeConfig        `mapstructure:"node"`
-	Archiver    ArchiverConfig    `mapstructure:"archiver"`
+	Server      ServerConfig       `mapstructure:"server"`
+	Log         LogConfig          `mapstructure:"log"`
+	Scheduler   SchedulerConfig    `mapstructure:"scheduler"`
+	Node        NodeConfig         `mapstructure:"node"`
+	Archiver    ArchiverConfig     `mapstructure:"archiver"`
 	Notification NotificationConfig `mapstructure:"notification"`
+	Lock        LockConfig         `mapstructure:"lock"`
+	Storage     StorageConfig      `mapstructure:"storage"`
 }
 
 type ServerConfig struct {
@@ -40,6 +44,26 @@ type NodeConfig struct {
 type ArchiverConfig struct {
 	BasePath            string `mapstructure:"base_path"`
 	DefaultRetentionDays int   `mapstructure:"default_retention_days"`
+	Bucket              string `mapstructure:"bucket"`
+}
+
+type LockConfig struct {
+	Type     string `mapstructure:"type"`
+	Address  string `mapstructure:"address"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	Prefix   string `mapstructure:"prefix"`
+}
+
+type StorageConfig struct {
+	Type      string `mapstructure:"type"`
+	Endpoint  string `mapstructure:"endpoint"`
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	Bucket    string `mapstructure:"bucket"`
+	Region    string `mapstructure:"region"`
+	UseSSL    bool   `mapstructure:"use_ssl"`
+	BasePath  string `mapstructure:"base_path"`
 }
 
 type NotificationConfig struct {
@@ -73,5 +97,28 @@ func (c *NotificationConfig) ToModel() models.NotificationConfig {
 		Enabled:  c.Enabled,
 		Email:    c.Email,
 		Webhook:  c.Webhook,
+	}
+}
+
+func (c *LockConfig) ToLockConfig() lock.LockConfig {
+	return lock.LockConfig{
+		Type:     c.Type,
+		Address:  c.Address,
+		Password: c.Password,
+		DB:       c.DB,
+		Prefix:   c.Prefix,
+	}
+}
+
+func (c *StorageConfig) ToStorageConfig() storage.StorageConfig {
+	return storage.StorageConfig{
+		Type:      c.Type,
+		Endpoint:  c.Endpoint,
+		AccessKey: c.AccessKey,
+		SecretKey: c.SecretKey,
+		Bucket:    c.Bucket,
+		Region:    c.Region,
+		UseSSL:    c.UseSSL,
+		BasePath:  c.BasePath,
 	}
 }

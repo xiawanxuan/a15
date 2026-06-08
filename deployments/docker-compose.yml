@@ -13,7 +13,19 @@ services:
       - ./data:/app/data
     environment:
       - LOG_LEVEL=info
-      - SERVER_PORT=8080
+      - LOCK_TYPE=redis
+      - LOCK_ADDRESS=redis:6379
+      - LOCK_PASSWORD=
+      - LOCK_DB=0
+      - STORAGE_TYPE=s3
+      - STORAGE_ENDPOINT=minio:9000
+      - STORAGE_ACCESS_KEY=minioadmin
+      - STORAGE_SECRET_KEY=minioadmin
+      - STORAGE_BUCKET=astro-data
+      - STORAGE_USE_SSL=false
+    depends_on:
+      - redis
+      - minio
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/v1/health"]
@@ -21,3 +33,31 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: astro-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: astro-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  minio-data:

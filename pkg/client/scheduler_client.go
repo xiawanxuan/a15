@@ -135,6 +135,34 @@ func (c *SchedulerClient) GetDataByTask(taskID string) ([]*models.ObservationDat
 	return result.Data, nil
 }
 
+func (c *SchedulerClient) GetDownloadURL(dataID string, expires int) (string, error) {
+	path := fmt.Sprintf("/data/%s/presigned-url?expires=%d", dataID, expires)
+	var result struct {
+		URL       string `json:"url"`
+		ExpiresIn int    `json:"expires_in"`
+	}
+
+	if err := c.get(path, &result); err != nil {
+		return "", err
+	}
+
+	return result.URL, nil
+}
+
+func (c *SchedulerClient) DownloadDataInfo(dataID string) (string, int, error) {
+	path := fmt.Sprintf("/data/%s/download", dataID)
+	var result struct {
+		DownloadURL string `json:"download_url"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+
+	if err := c.get(path, &result); err != nil {
+		return "", 0, err
+	}
+
+	return result.DownloadURL, result.ExpiresIn, nil
+}
+
 func (c *SchedulerClient) CreateAlert(alert *models.Alert) (*models.Alert, error) {
 	var result models.Alert
 	if err := c.post("/alerts", alert, &result); err != nil {

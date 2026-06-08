@@ -14,6 +14,8 @@ import (
 	"astro-scheduler/internal/node"
 	"astro-scheduler/internal/notifier"
 	"astro-scheduler/internal/scheduler"
+	"astro-scheduler/pkg/lock"
+	"astro-scheduler/pkg/storage"
 	"astro-scheduler/pkg/utils"
 )
 
@@ -35,6 +37,28 @@ func main() {
 
 	utils.Sugar.Info("Starting Astro Scheduler Service...")
 
+	distLock, err := lock.NewDistributedLock(cfg.Lock.ToLockConfig())
+	if err != nil {
+		utils.Sugar.Fatalf("Failed to create distributed lock: %v", err)
+	}
+	defer func() {
+		if distLock != nil {
+			_ = distLock.Close()
+		}
+	}()
+	utils.Sugar.Infof("Distributed lock initialized: %s", cfg.Lock.Type)
+
+	objectStorage, err := storage.NewObjectStorage(cfg.Storage.ToStorageConfig())
+	if err != nil {
+		utils.Sugar.Fatalf("Failed to create object storage: %v", err)
+	}
+	defer func() {
+		if objectStorage != nil {
+			_ = objectStorage.Close()
+		}
+	}()
+	utils.Sugar.Infof("Object storage initialized: %s", cfg.Storage.Type)
+
 	alertStore := notifier.NewAlertStore()
 	notifierSvc := notifier.NewNotifier(alertStore, cfg.Notification.ToModel())
 	notifierSvc.Start()
@@ -48,12 +72,19 @@ func main() {
 	defer nodeManager.Stop()
 
 	dataStore := archiver.NewDataStore()
-	archiverSvc := archiver.NewArchiver(dataStore, notifierSvc, cfg.Archiver.BasePath)
+	archiverSvc := archiver.NewArchiver(
+		dataStore,
+		notifierSvc,
+		objectStorage,
+		distLock,
+		cfg.Archiver.Bucket,
+		cfg.Archiver.BasePath,
+	)
 	archiverSvc.Start()
 	defer archiverSvc.Stop()
 
 	taskStore := scheduler.NewTaskStore()
-	schedulerSvc := scheduler.NewScheduler(taskStore, nodeManager, notifierSvc)
+	schedulerSvc := scheduler.NewScheduler(taskStore, nodeManager, notifierSvc, distLock)
 	schedulerSvc.Start()
 	defer schedulerSvc.Stop()
 

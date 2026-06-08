@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"astro-scheduler/pkg/lock"
 	"astro-scheduler/pkg/models"
 	"astro-scheduler/pkg/utils"
 )
@@ -21,25 +22,28 @@ type AlertManager interface {
 }
 
 type Scheduler struct {
-	store       *TaskStore
-	nodeManager NodeManager
+	store        *TaskStore
+	nodeManager  NodeManager
 	alertManager AlertManager
-	queue       PriorityQueue
-	mu          sync.Mutex
-	running     bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	dispatchCh  chan *models.Task
-	retryCh     chan *models.Task
-	eventCh     chan *models.TaskEvent
+	lock         lock.DistributedLock
+	queue        PriorityQueue
+	mu           sync.Mutex
+	running      bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	dispatchCh   chan *models.Task
+	retryCh      chan *models.Task
+	eventCh      chan *models.TaskEvent
+	lockTTL      time.Duration
 }
 
-func NewScheduler(store *TaskStore, nodeManager NodeManager, alertManager AlertManager) *Scheduler {
+func NewScheduler(store *TaskStore, nodeManager NodeManager, alertManager AlertManager, distLock lock.DistributedLock) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scheduler{
 		store:        store,
 		nodeManager:  nodeManager,
 		alertManager: alertManager,
+		lock:         distLock,
 		queue:        make(PriorityQueue, 0),
 		running:      false,
 		ctx:          ctx,
@@ -47,6 +51,7 @@ func NewScheduler(store *TaskStore, nodeManager NodeManager, alertManager AlertM
 		dispatchCh:   make(chan *models.Task, 100),
 		retryCh:      make(chan *models.Task, 50),
 		eventCh:      make(chan *models.TaskEvent, 200),
+		lockTTL:      10 * time.Second,
 	}
 }
 
@@ -112,9 +117,22 @@ func (s *Scheduler) dispatchTasks() {
 			break
 		}
 
+		lockKey := fmt.Sprintf("task:dispatch:%s", task.ID)
+		locked, err := s.lock.TryLock(s.ctx, lockKey, s.lockTTL)
+		if err != nil {
+			utils.Sugar.Errorf("Failed to acquire lock for task %s: %v", task.ID, err)
+			break
+		}
+		if !locked {
+			task = heap.Pop(&s.queue).(*models.Task)
+			utils.Sugar.Debugf("Task %s already being dispatched by another instance, skipping", task.ID)
+			continue
+		}
+
 		node := s.selectBestNode(task, nodes)
 		if node == nil {
 			utils.Sugar.Warnf("No suitable node found for task %s", task.ID)
+			_ = s.lock.Unlock(s.ctx, lockKey)
 			break
 		}
 
@@ -123,6 +141,7 @@ func (s *Scheduler) dispatchTasks() {
 		if err := s.store.AssignTask(task.ID, node.ID); err != nil {
 			utils.Sugar.Errorf("Failed to assign task %s: %v", task.ID, err)
 			heap.Push(&s.queue, task)
+			_ = s.lock.Unlock(s.ctx, lockKey)
 			continue
 		}
 
@@ -131,6 +150,7 @@ func (s *Scheduler) dispatchTasks() {
 		}
 
 		s.dispatchCh <- task
+		_ = s.lock.Unlock(s.ctx, lockKey)
 		utils.Sugar.Infof("Task %s dispatched to node %s", task.ID, node.ID)
 	}
 }
@@ -166,17 +186,36 @@ func (s *Scheduler) retryLoop() {
 }
 
 func (s *Scheduler) handleRetry(task *models.Task) {
-	if task.RetryCount >= task.MaxRetries {
-		utils.Sugar.Errorf("Task %s exceeded max retries (%d)", task.ID, task.MaxRetries)
+	retryLockKey := fmt.Sprintf("task:retry:%s", task.ID)
+	locked, err := s.lock.TryLock(s.ctx, retryLockKey, 30*time.Second)
+	if err != nil {
+		utils.Sugar.Errorf("Failed to acquire retry lock for task %s: %v", task.ID, err)
+		return
+	}
+	if !locked {
+		utils.Sugar.Debugf("Task %s retry already in progress by another instance", task.ID)
+		return
+	}
+	defer func() {
+		_ = s.lock.Unlock(s.ctx, retryLockKey)
+	}()
+
+	currentTask, exists := s.store.GetTask(task.ID)
+	if !exists {
+		return
+	}
+
+	if currentTask.RetryCount >= currentTask.MaxRetries {
+		utils.Sugar.Errorf("Task %s exceeded max retries (%d)", task.ID, currentTask.MaxRetries)
 
 		if s.alertManager != nil {
 			_, _ = s.alertManager.CreateAlert(
 				models.AlertTypeTaskFailed,
 				models.AlertSeverityCritical,
-				fmt.Sprintf("Task Failed: %s", task.Name),
-				fmt.Sprintf("Task %s failed after %d retries. Error: %s", task.ID, task.RetryCount, task.ErrorMessage),
+				fmt.Sprintf("Task Failed: %s", currentTask.Name),
+				fmt.Sprintf("Task %s failed after %d retries. Error: %s", task.ID, currentTask.RetryCount, currentTask.ErrorMessage),
 				task.ID,
-				task.AssignedNode,
+				currentTask.AssignedNode,
 			)
 		}
 
@@ -188,30 +227,31 @@ func (s *Scheduler) handleRetry(task *models.Task) {
 		return
 	}
 
-	retryDelay := time.Duration(task.RetryCount) * 5 * time.Second
-	utils.Sugar.Infof("Task %s will be retried in %v (retry %d/%d)", task.ID, retryDelay, task.RetryCount, task.MaxRetries)
+	updatedTask, _ := s.store.GetTask(task.ID)
+	retryDelay := time.Duration(updatedTask.RetryCount) * 5 * time.Second
+	utils.Sugar.Infof("Task %s will be retried in %v (retry %d/%d)", task.ID, retryDelay, updatedTask.RetryCount, updatedTask.MaxRetries)
 
 	if s.alertManager != nil {
 		_, _ = s.alertManager.CreateAlert(
 			models.AlertTypeTaskRetry,
 			models.AlertSeverityWarning,
-			fmt.Sprintf("Task Retry: %s", task.Name),
-			fmt.Sprintf("Task %s is being retried (%d/%d)", task.ID, task.RetryCount, task.MaxRetries),
+			fmt.Sprintf("Task Retry: %s", updatedTask.Name),
+			fmt.Sprintf("Task %s is being retried (%d/%d)", task.ID, updatedTask.RetryCount, updatedTask.MaxRetries),
 			task.ID,
-			task.AssignedNode,
+			updatedTask.AssignedNode,
 		)
 	}
 
 	go func() {
 		time.Sleep(retryDelay)
 
-		updatedTask, exists := s.store.GetTask(task.ID)
+		queuedTask, exists := s.store.GetTask(task.ID)
 		if !exists {
 			return
 		}
 
 		s.mu.Lock()
-		heap.Push(&s.queue, updatedTask)
+		heap.Push(&s.queue, queuedTask)
 		s.mu.Unlock()
 
 		utils.Sugar.Infof("Task %s re-queued for retry", task.ID)
@@ -230,6 +270,18 @@ func (s *Scheduler) eventLoop() {
 }
 
 func (s *Scheduler) MarkTaskRunning(taskID, nodeID string) error {
+	lockKey := fmt.Sprintf("task:status:%s", taskID)
+	locked, err := s.lock.TryLock(s.ctx, lockKey, s.lockTTL)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("task status update in progress by another instance")
+	}
+	defer func() {
+		_ = s.lock.Unlock(s.ctx, lockKey)
+	}()
+
 	if err := s.store.UpdateTaskStatus(taskID, models.TaskStatusRunning, ""); err != nil {
 		return err
 	}
@@ -238,15 +290,33 @@ func (s *Scheduler) MarkTaskRunning(taskID, nodeID string) error {
 }
 
 func (s *Scheduler) MarkTaskCompleted(taskID, dataID string) error {
+	lockKey := fmt.Sprintf("task:status:%s", taskID)
+	locked, err := s.lock.TryLock(s.ctx, lockKey, s.lockTTL)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("task status update in progress by another instance")
+	}
+	defer func() {
+		_ = s.lock.Unlock(s.ctx, lockKey)
+	}()
+
 	task, exists := s.store.GetTask(taskID)
 	if !exists {
 		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	if task.Status == models.TaskStatusCompleted {
+		utils.Sugar.Warnf("Task %s already completed", taskID)
+		return nil
 	}
 
 	if task.AssignedNode != "" {
 		if err := s.nodeManager.UpdateNodeTaskCount(task.AssignedNode, -1); err != nil {
 			utils.Sugar.Errorf("Failed to decrement node task count: %v", err)
 		}
+		s.nodeManager.IncrementCompletedTasks(task.AssignedNode)
 	}
 
 	if err := s.store.UpdateTaskStatus(taskID, models.TaskStatusCompleted, ""); err != nil {
@@ -261,15 +331,33 @@ func (s *Scheduler) MarkTaskCompleted(taskID, dataID string) error {
 }
 
 func (s *Scheduler) MarkTaskFailed(taskID, errorMessage string) error {
+	lockKey := fmt.Sprintf("task:status:%s", taskID)
+	locked, err := s.lock.TryLock(s.ctx, lockKey, s.lockTTL)
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("task status update in progress by another instance")
+	}
+	defer func() {
+		_ = s.lock.Unlock(s.ctx, lockKey)
+	}()
+
 	task, exists := s.store.GetTask(taskID)
 	if !exists {
 		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	if task.Status == models.TaskStatusFailed || task.Status == models.TaskStatusCompleted {
+		utils.Sugar.Warnf("Task %s already in final state: %s", taskID, task.Status)
+		return nil
 	}
 
 	if task.AssignedNode != "" {
 		if err := s.nodeManager.UpdateNodeTaskCount(task.AssignedNode, -1); err != nil {
 			utils.Sugar.Errorf("Failed to decrement node task count: %v", err)
 		}
+		s.nodeManager.IncrementFailedTasks(task.AssignedNode)
 	}
 
 	if err := s.store.UpdateTaskStatus(taskID, models.TaskStatusFailed, errorMessage); err != nil {

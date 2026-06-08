@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"astro-scheduler/internal/archiver"
 	"astro-scheduler/pkg/models"
@@ -145,4 +146,58 @@ func (h *DataHandler) DeletePolicy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "policy deleted"})
+}
+
+func (h *DataHandler) DownloadData(c *gin.Context) {
+	dataID := c.Param("id")
+
+	data, exists := h.archiver.GetData(dataID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "data not found"})
+		return
+	}
+
+	if data.ArchiveStatus != models.ArchiveStatusArchived {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "data not archived yet"})
+		return
+	}
+
+	url, err := h.archiver.GetPresignedURL(dataID, 15*60*1000000000)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if url != "" {
+		c.JSON(http.StatusOK, gin.H{
+			"download_url": url,
+			"expires_in":   900,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":   data,
+		"bucket": data.FilePath,
+	})
+}
+
+func (h *DataHandler) GetPresignedURL(c *gin.Context) {
+	dataID := c.Param("id")
+	expiresStr := c.DefaultQuery("expires", "3600")
+	expiresSeconds, err := strconv.Atoi(expiresStr)
+	if err != nil {
+		expiresSeconds = 3600
+	}
+
+	url, err := h.archiver.GetPresignedURL(dataID, time.Duration(expiresSeconds)*time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"url":        url,
+		"expires_in": expiresSeconds,
+	})
 }
