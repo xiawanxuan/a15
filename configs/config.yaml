@@ -1,0 +1,35 @@
+server:
+  port: "8080"
+  mode: "release"
+
+log:
+  level: "info"
+  file: ""
+
+scheduler:
+  max_retries: 3
+  retry_interval: 5
+
+node:
+  heartbeat_timeout: 30
+  check_interval: 10
+
+archiver:
+  base_path: "./data/archive"
+  default_retention_days: 365
+
+notification:
+  enabled: false
+  channels:
+    - "webhook"
+  email:
+    smtp_host: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    from: ""
+    receivers: []
+  webhook:
+    url: ""
+    method: "POST"
+    headers: {}
